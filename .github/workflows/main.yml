@@ -1,0 +1,70 @@
+name: CI/CD Pipeline for Python Project with AWS Deployment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest
+
+  deploy:
+    needs: build-and-test  # Wait for build-and-test to succeed
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'  # Only run on the main branch
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3  # Checkout the repo to access your CloudFormation template
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: 'us-east-1'  # Replace with your desired AWS region
+
+      - name: Deploy CloudFormation Stack
+        run: |
+          # Define variables to replace Octopus placeholders
+          OCTOPUS_ENVIRONMENT_NAME="production"  # Example: Set this based on your needs, e.g., from GitHub contexts
+          OCTOPUS_ROLE="PetShopFrontEnd"
+          OCTOPUS_PROJECT_NAME="${{ github.repository }}"  # Use GitHub context for the project name
+
+          # Use sed or a similar tool to replace placeholders in your template
+          # Assuming your template is in ecs-cluster-template.json
+          cp ecs-cluster-template.json temp-template.json  # Make a copy to modify
+          sed -i "s/#{Octopus.Environment.Name}/$OCTOPUS_ENVIRONMENT_NAME/g" temp-template.json
+          sed -i "s/#{Octopus.Role}/$OCTOPUS_ROLE/g" temp-template.json
+          sed -i "s/#{Octopus.Project.Name}/$OCTOPUS_PROJECT_NAME/g" temp-template.json
+
+          # Deploy the stack using AWS CLI
+          aws cloudformation deploy \
+            --stack-name MyECSClusterStack \  # Give your stack a unique name
+            --template-file temp-template.json \
+            --capabilities CAPABILITY_IAM  # Required for resources that create IAM roles
+            --region us-east-1  # Match your AWS region
+
+      - name: Clean up
+        run: rm temp-template.json  # Remove the temporary file
+        
